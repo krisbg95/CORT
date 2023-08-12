@@ -2,4 +2,4 @@ Associates_and_Predictors.m: Matlab code to find correlates and predictors of a 
 CORT_data.mat: Clinical data for PROMIS fatigue at three different timepoints (baseline, 3 months, 6 months). All baseline neuroimaging modalities from RA cohort of CORT, including structural grey matter volumes, thickness, and surface area, and functional connectivity matrices from resting-state data 
 PROMIS_tables_figures.Rmd: R code to create tables and figures from the Associates_and_Predictors.m excel sheet output Results.xlsx 
 Results.xlsx: the output from Associates_and_Predictors.m 
-clean_duplicates.m: additional code that Predictors.m requires to handle duplicates in results.
+clean_duplicates.m: additional code that Associates_and_Predictors.m requires to handle duplicates in results.
