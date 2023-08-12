@@ -1,0 +1,297 @@
+---
+title: "BRAF to Excel"
+output: html_document
+date: "2022-10-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,ft.keepnext = F) 
+
+```
+
+```{r} 
+# 0. Load libraries
+library(readxl)    
+library(dplyr) 
+library(flextable)  
+library(ftExtra) 
+library(officer) 
+library(devtools)  
+# install_github("jokergoo/ComplexHeatmap")
+library(ComplexHeatmap) ## package to create Legend 
+library(circlize) ## package to create circular diagrams of all connections
+library(tiff)
+library(grid)
+library(aspace)
+```
+
+
+```{r}
+# 1. Extract scores from summary spreadsheet
+mdir = getwd()
+## Create function to read all spreadsheets from the master copy
+read_excel_allsheets = function(filename, tibble = FALSE) {
+    sheets = readxl::excel_sheets(filename)
+    x = lapply(sheets, function(X) readxl::read_excel(filename, sheet = X,na="NA"))
+    if(!tibble) x = lapply(x, as.data.frame)
+    names(x) = sheets
+    x
+}   
+
+sheets = read_excel_allsheets("Results.xlsx")   
+names(sheets) = c("Resting-state Functional Connectivity Baseline","Grey Matter Volume Baseline","Grey Matter Area Baseline","Grey Matter Thickness Baseline")
+```
+
+```{r} 
+conn =  grep('Connectivity', names(sheets)); conn = sheets[conn,drop=F];conn = conn[sapply(conn, function(x) dim(x)[1]) > 0] 
+morph = grep('Grey Matter', names(sheets)); morph = sheets[morph,drop=F];morph = morph[sapply(morph, function(x) dim(x)[1]) > 0] 
+```
+
+
+```{r}
+eslabel = function(x){if(x<0.1){y='trivial'} else if (x>0.1 & x<0.25) {y='small'} else if(x>0.25 & x<0.37){y='medium'} else if(x>0.37){y='large'};y}  
+# mylabel = apply(test[,'effectsize',drop=F],1,eslabel) 
+# test = conn$`PASAT Functional Connectivity Baseline`
+
+```
+
+```{r}
+for (i in  1:length(conn)){
+  x = conn[[i]]  
+  if(length(x)>0){
+    x[,'rawpvalue'] = NULL; 
+    x[,'Coefficient'] = NULL; 
+    colnames(x) = c("Outcome","ROI Seed","ROI Target","T statistic","p value FDR","effect size") 
+    x[['Outcome']] = gsub("promis1[[:punct:]][[:digit:]]", " PROMIS Fatigue Baseline",x[['Outcome']])
+    x[['Outcome']] = gsub("promis2[[:punct:]][[:digit:]]", " PROMIS Fatigue 3 Months",x[['Outcome']])
+    x[['Outcome']] = gsub("promis3[[:punct:]][[:digit:]]", " PROMIS Fatigue 6 Months",x[['Outcome']])
+    x$Outcome = as.factor(x$Outcome) 
+    x[,'T statistic'] = round(x[,'T statistic'],2)
+    }  
+    conn[[i]] = x
+}
+
+```
+
+```{r} 
+library(dplyr) 
+createtable = function(test,modality){
+  test[,'p value FDR'] = round(test[,'p value FDR'],3)  
+  labels = apply(test[,'effect size',drop=F],1,eslabel)
+  test[,'effect size'] = round(test[,'effect size'],2)
+  test[,'effect size'] = paste0(test[,'effect size']," (",labels,")") 
+  
+  names(test)[names(test) == "effect size"] <- paste0("Effect size \n Eta squared") 
+  test = test[rev(order(test$Outcome,abs(test$`T statistic`))),]
+  test = flextable::as_grouped_data(test,groups = c("Outcome")) 
+  rois = paste0(test[,'ROI Seed'],test[,'ROI Target'])  
+  empty = which(rois=="NANA") 
+  rois[empty] = seq(1,length(empty),length=length(empty))
+  rois = which(duplicated(rois) | duplicated(rois, fromLast=T)) 
+  ft = test 
+  
+  ft = ft %>% 
+    as_flextable( ) %>% 
+    flextable::compose(
+      i = ~ !is.na(Outcome), # when not NA
+      j = c("ROI Seed","ROI Target"), 
+      value = as_paragraph(as_chunk(Outcome))) %>% 
+    hline(i = ~ !is.na(Outcome), border = officer::fp_border() ) %>% 
+    autofit() 
+  
+  ft = set_caption(ft,modality,style = "Table Caption")    
+  # ft = fontsize(ft,size = 8)
+  ft = autofit(ft)   
+  # ft <- align(ft,align = "center") 
+  ft = highlight(ft,rois,color = "wheat", j = c("ROI Seed", "ROI Target")) 
+  ft = add_footer_lines(ft, "Effect sizes are labelled as trivial<0.1, small>=0.1, medium>=0.25, large >0.37.");ft = color(ft, part = "footer", color = "#666666")   
+  ft = set_table_properties(ft, layout = "autofit")
+  ft
+}
+```
+
+```{r}
+tablesconn = lapply(seq_along(conn), function(y,n,i){modality = n[i];createtable(y[[i]],modality)},y=conn,n=names(conn)) 
+names(tablesconn) = names(conn)
+```
+
+```{r}
+for (i in  1:length(morph)){
+  x = morph[[i]]  
+  if(length(x)>0){
+    x[,'rawpvalue'] = NULL; 
+    x[,'Coefficient'] = NULL; 
+    colnames(x) = c("Outcome","ROI Seed","T statistic","p value FDR","effect size") 
+    x[['Outcome']] = gsub("promis1[[:punct:]][[:digit:]]", " PROMIS Fatigue Baseline",x[['Outcome']])
+    x[['Outcome']] = gsub("promis2[[:punct:]][[:digit:]]", " PROMIS Fatigue 3 Months",x[['Outcome']])
+    x[['Outcome']] = gsub("promis3[[:punct:]][[:digit:]]", " PROMIS Fatigue 6 Months",x[['Outcome']])
+    x$Outcome = as.factor(x$Outcome) 
+    x[,'T statistic'] = round(x[,'T statistic'],2)
+    }  
+    morph[[i]] = x
+}
+
+```
+
+
+```{r}
+createtable = function(test,modality){
+  test[,'p value FDR'] = round(test[,'p value FDR'],3) 
+  labels = apply(test[,'effect size',drop=F],1,eslabel)
+  test[,'effect size'] = round(test[,'effect size'],2)
+  test[,'effect size'] = paste0(test[,'effect size']," (",labels,")") 
+  
+  names(test)[names(test) == "effect size"] <- paste0("Effect size \n Eta squared")
+  test = test[rev(order(test$Outcome,abs(test$`T statistic`))),]
+  test = flextable::as_grouped_data(test,groups = c("Outcome")) 
+  rois = paste0(test[,'ROI Seed'])  
+  empty = which(rois=="NA") 
+  rois[empty] = seq(1,length(empty),length=length(empty))
+  rois = which(duplicated(rois) | duplicated(rois, fromLast=T)) 
+  ft = test 
+  
+  ft = ft %>% 
+    as_flextable( ) %>% 
+    flextable::compose(
+      i = ~ !is.na(Outcome), # when not NA
+      j = c("ROI Seed"), 
+      value = as_paragraph(as_chunk(Outcome))) %>% 
+    hline(i = ~ !is.na(Outcome), border = officer::fp_border() ) %>% 
+    autofit() 
+  
+  ft = set_caption(ft,modality,style = "Table Caption")    
+  # ft = fontsize(ft,size = 8)
+  ft = autofit(ft)   
+  # ft <- align(ft,align = "center") 
+  ft = highlight(ft,rois,color = "wheat", j = c("ROI Seed")) 
+  ft = add_footer_lines(ft, "Effect sizes are labelled as trivial<0.1, small>=0.1, medium>=0.25, large >0.37.");ft = color(ft, part = "footer", color = "#666666")   
+  ft = set_table_properties(ft, layout = "autofit")
+  ft 
+}
+```
+
+```{r}
+tablesmorph = lapply(seq_along(morph), function(y,n,i){modality = n[i];createtable(y[[i]],modality)},y=morph,n=names(morph)) 
+names(tablesmorph) = names(morph)
+```
+
+```{r eval=FALSE, include=FALSE}
+combined = c(tablesconn,tablesmorph)  
+# lapply(seq_along(combined),function(y,n,i){save_as_docx(y[[i]],path=paste0(n[i],".docx"))},y=combined,n=names(combined)) 
+word_export <- read_docx() 
+for (i in 1:length(combined)){
+  body_add_flextable(word_export,combined[[i]]) 
+  body_add_par(word_export, value = "")
+}
+# print(word_export,"Tables.docx")
+```
+
+```{r}
+library(tidyr)
+data = bind_rows(conn,morph)  
+data = pivot_longer(data,colnames(data))  
+data = data[rev(order(data$value$Outcome,abs(data$value$`T statistic`))),] 
+data = data[rowSums(!is.na(data)) >= 2, ]    
+data = as.data.frame(as.matrix(data))  
+colnames(data) = c("Modality","Outcome","ROI Seed","ROI Target","Tstatistic","p value FDR","effect size") 
+data = distinct(data)
+data$Outcome = as.factor(data$Outcome) 
+data$Modality = as.factor(data$Modality) 
+levels(data$Modality) = c("Thickness","Connectivity") ##c("Thickness","Volume","Connectivity")
+data = split(data,data$Outcome)
+```
+
+```{r}
+## Load files   
+regions = read.csv("Regions.csv")  
+Regions_order = read.csv(paste0(getwd(),"/Regions_order.csv"))  
+Regions_order$Lobe = as.factor(Regions_order$Lobe)  
+## Set Lobes as different colours
+regions$network = as.factor(regions$network)  
+regions$colour = regions$network 
+levels(regions$colour) = c("#e495a5","#99a9e2","#55b8d0","#c29dde","#bdab66","black","#65bc8c") 
+## Colours for lobes: Frontal, Insula, Limbic, Occipital, Parietal, Subcortical, Temporal 
+```
+
+
+```{r}
+fignames = names(data) 
+fignames = gsub(" ","_",fignames)
+
+for (i in 1:length(data)){ 
+  table = data[[i]] 
+  table$Tstatistic = as.numeric(table$Tstatistic)
+  dtable = table[,c(1,3,4,5)]  
+  dtable[!dtable$Modality=="Connectivity",3] = dtable[!dtable$Modality=="Connectivity",2]
+  dtable$connvalue = dtable$Tstatistic
+  dtable[!dtable$Modality=="Connectivity",5] = 0 
+  morder = as.data.frame(unique(c(dtable[,'ROI Seed'],dtable[,'ROI Target']))) 
+  names(morder) = "Region"
+  morder = merge.data.frame(Regions_order,morder,by = "Region")   
+  for (j in 1:nrow(morder)){dtable[['ROI Seed']] =
+    gsub(morder[j,1],regions[morder[j,3],1],dtable[['ROI Seed']]);dtable[['ROI Target']] =
+      gsub(morder[j,1],regions[morder[j,3],1],dtable[['ROI Target']])} 
+  morder = regions[morder$Order,]  
+  dtable$scale = 1 
+  
+  mmin = round(min(dtable$Tstatistic) - 0.5,0) 
+  mmax = round(max(dtable$Tstatistic) + 0.5,0) 
+  if(mmin>0){col_fun <- colorRamp2(c(mmin, 0,mmax), c("yellow", "white", "red"), transparency = 0.7) 
+  lgd_links = Legend(at = c(mmin, 0,mmax),col_fun = col_fun,direction = "horizontal",title = "t statistic", title_position = "topcenter",title_gp = gpar(fontsize = 15, fontface = "bold"),labels_gp = gpar(fontsize = 15),legend_width = unit(6, "cm"))} else if (mmin<0){col_fun <- colorRamp2(c(mmin, 0,mmax), c("blue", "white", "red"), transparency = 0.7) 
+  lgd_links = Legend(at = c(mmin, 0,mmax),col_fun = col_fun,direction = "horizontal",title = "t statistic", title_position = "topcenter",title_gp = gpar(fontsize = 15, fontface = "bold"),labels_gp = gpar(fontsize = 15),legend_width = unit(6, "cm"))}
+  mgrid = as.character(morder$colour) 
+  names(mgrid) = morder$Region 
+  
+  # Brain volume and thickness (vector of volume and thickness values)
+  volume <- data.frame(Volume = dtable[dtable$Modality == "Volume","Tstatistic"])
+  row.names(volume) <- dtable[dtable$Modality == "Volume",2] 
+  thickness <- data.frame(Thickness = dtable[dtable$Modality == "Thickness","Tstatistic"])
+  row.names(thickness) <- dtable[dtable$Modality == "Thickness",2] 
+  
+  par(cex=1.3,font=2,mar = c(0, 0, 0, 0),oma = c(0,0,0,0), mgp = c(0, 0, 0),xpd = NA) 
+  circos.par(canvas.xlim= c(0,0),canvas.ylim=c(-1.2,1.2),start.degree=295)
+  
+  chordDiagram(dtable[,c(2,3,6)],link.lwd = 1,directional = 0,direction.type = "arrows",
+               link.lty = 1,annotationTrack = c("grid","name"),order =
+                 morder$Region,grid.col = mgrid,col = col_fun(dtable[[5]]),link.sort =
+                 T,link.zindex = rank(abs(dtable[[5]])))     
+  title(paste0("Baseline predictors of",names(data)[i]), cex = 1.5,adj = 0.45,line = -1,font=1)
+  draw(lgd_links, x = unit(0.74, "npc") - unit(2, "mm"), y = unit(10, "mm"), just = c("left", "bottom"))
+  
+  for (si in get.all.sector.index()) {
+    if (is.element(si,row.names(thickness))){
+      x <- get.cell.meta.data("xcenter", si) 
+      x1 = get.cell.meta.data("xlim", si)[1]  
+      x2 = get.cell.meta.data("xlim", si)[2] 
+      circos.rect(sector.index = si, xleft = x1, xright = x2,
+                  ybottom = -1.5, ytop = -2.5,  # Adjust the y coordinates
+                  col = col_fun(thickness[si, ]), border = NA, lwd = 1)  
+      circos.text(sector.index = si, x = x, y = -0.7, labels = "Thickness", col = "black", cex = 0.7,facing = "bending.outside")   
+    } 
+    if (is.element(si,row.names(volume))){
+      x <- get.cell.meta.data("xcenter", si) 
+      x1 = get.cell.meta.data("xlim", si)[1]  
+      x2 = get.cell.meta.data("xlim", si)[2] 
+      circos.rect(sector.index = si, xleft = x1, xright = x2,
+                  ybottom = -4, ytop = -5,  # Adjust the y coordinates
+                  col = col_fun(volume[si, ]), border = NA, lwd = 1)  
+      circos.text(sector.index = si, x = x, y = -3.3, labels = "Volume", col = "black", cex = 0.7,facing = "bending.outside") 
+    }
+    ## Add image over each brain region
+    pcidir <- paste0(mdir, "/Figures/", si, ".tif")
+    img_path <- pcidir  # Replace with the path to your image
+    img_width <- 0.4  # Adjust the image width
+    img_height <- 0.4  # Adjust the image height
+    img <- readTIFF(img_path)
+    
+    xplot <- get.cell.meta.data("xplot", si)
+    x <- 1.2 * cos(as_radians((xplot[2] + xplot[1]) / 2))  # Increase the radius
+    y <- 1.2 * sin(as_radians((xplot[2] + xplot[1]) / 2))  # Increase the radius
+    
+    rasterImage(img, x - 0.09, y - 0.09, x + 0.09, y + 0.09)
+  }  
+  circos.clear()  
+  
+  dev.print(png, paste0(fignames[i],".png"),height=9, width=9,units = "in", res = 300)
+}
+```
